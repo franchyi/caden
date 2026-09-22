@@ -1,0 +1,45 @@
+# tool-call token trace
+# claude -p --output-format stream-json --include-partial-messages --verbose --model sonnet
+# columns:  <raw.jsonl line>   <elapsed s>   <event>
+
+L22      4.99  -- block complete
+L23      4.99  .. assistant text block begins
+L27      5.42  -- block complete
+L28      5.42  >> TOOL_USE START   name='Write'   <-- name known here, no args yet
+L29      5.42       args-delta   ''
+L30      5.80       args-delta   '{"file_path": "/private/tmp/claude-501/-Users-chao'
+L31      6.18       args-delta   'yi-Downloads-aschedule/b685e'
+L32      6.56       args-delta   '1ba-9a54-44b3'
+L33      6.96       args-delta   '-ac21-a4142aaa49'
+L34      7.33       args-delta   'db/scratchpad/tool_trace_work'
+L35      7.74       args-delta   '/calc.py'
+L36      7.74       args-delta   '", "content": "def add(a, b):\\n    return a + b\\n'
+L37      7.81       args-delta   '"}'
+L38      7.81  [resolved tool_use]  name='Write'  input={'file_path': '/private/tmp/claude-501/-Users-chaoyi-Do...', 'content': 'def add(a, b):\n    return a + b\n'}
+L39      7.81  -- tool input COMPLETE   name='Write'   lead=2.39s
+L43      7.94  <- tool_result returned (id=toolu_01TWRg1PzUZG)
+L46      9.59  >> TOOL_USE START   name='Read'   <-- name known here, no args yet
+L47      9.65       args-delta   ''
+L48      9.66       args-delta   '{"file_path": "/private/tmp/claude-501/-Users-chaoyi-Downloa'
+L49      9.84       args-delta   '49db/scratchpad/tool_trace_work/calc.py'
+L50      9.84       args-delta   '"}'
+L51      9.84  [resolved tool_use]  name='Read'  input={'file_path': '/private/tmp/claude-501/-Users-chaoyi-Do...'}
+L52      9.84  -- tool input COMPLETE   name='Read'   lead=0.25s
+L55      9.97  <- tool_result returned (id=toolu_01Uehekt3YTm)
+L58     11.62  .. assistant text block begins
+L62     11.63  -- block complete
+L63     11.63  >> TOOL_USE START   name='Edit'   <-- name known here, no args yet
+L64     11.63       args-delta   ''
+L65     11.63       args-delta   '{"file_path": "/private/tmp/'
+L66     12.02       args-delta   'claude-501/-Users-chaoyi-Downloads-aschedule/b685e1ba-9a54-4'
+L67     12.46       args-delta   '", "old_string": "def add(a, b):\\n    return a + b\\n'
+L68     12.46       args-delta   '", "new_string": "def add(a, b):\\n    return a + b'
+L69     12.64       args-delta   '\\n\\n\\ndef subtract(a, b):\\n    return a - b\\n'
+L70     12.64       args-delta   '"}'
+L71     12.64  [resolved tool_use]  name='Edit'  input={'replace_all': 'False', 'file_path': '/private/tmp/claude-501/-Users-chaoyi-Do...', 'old_string': 'def add(a, b):\n    return a + b\n', 'new_string': 'def add(a, b):\n    return a + b\n\n\ndef su...'}
+L72     12.65  -- tool input COMPLETE   name='Edit'   lead=1.02s
+L75     12.78  <- tool_result returned (id=toolu_011s1XFrJZby)
+L78     14.07  .. assistant text block begins
+L82     14.07  -- block complete
+
+L85     14.17  RESULT  cost=$0.09680399999999999  turns=4

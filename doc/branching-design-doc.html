@@ -1,0 +1,1205 @@
+<title>Branching KV Cache for Agent Sessions — Design Document</title>
+<style>
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: local('JetBrains Mono'), local('Menlo'), local('Consolas');
+    font-display: swap;
+  }
+
+  :root {
+    --bg: #0C0E12;
+    --bg-elevated: #13161C;
+    --bg-surface: #1A1E26;
+    --bg-inset: #0A0C0F;
+    --text-primary: #D8DDE6;
+    --text-secondary: #8B93A1;
+    --text-muted: #545D6E;
+    --accent: #4A90D9;
+    --accent-dim: #2E5A8A;
+    --accent-glow: rgba(74, 144, 217, 0.08);
+    --border: #232830;
+    --border-accent: #2E5A8A;
+    --tag-bg: rgba(74, 144, 217, 0.1);
+    --tag-text: #6FAADF;
+    --warn: #D4A854;
+    --warn-bg: rgba(212, 168, 84, 0.08);
+    --good: #5AAF6F;
+    --good-bg: rgba(90, 175, 111, 0.08);
+    --bad: #C75D5D;
+    --bad-bg: rgba(199, 93, 93, 0.08);
+    --mono: 'JetBrains Mono', 'Menlo', 'Consolas', monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    --measure: 72ch;
+  }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #F6F7F9;
+      --bg-elevated: #FFFFFF;
+      --bg-surface: #EEF0F3;
+      --bg-inset: #E6E8EC;
+      --text-primary: #1A1E26;
+      --text-secondary: #545D6E;
+      --text-muted: #8B93A1;
+      --accent: #2E6AB8;
+      --accent-dim: #C4D8ED;
+      --accent-glow: rgba(46, 106, 184, 0.06);
+      --border: #D4D8DF;
+      --border-accent: #A8C4E0;
+      --tag-bg: rgba(46, 106, 184, 0.08);
+      --tag-text: #2E6AB8;
+      --warn: #A07A2D;
+      --warn-bg: rgba(160, 122, 45, 0.06);
+      --good: #3D8A52;
+      --good-bg: rgba(61, 138, 82, 0.06);
+      --bad: #B04040;
+      --bad-bg: rgba(176, 64, 64, 0.06);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #F6F7F9;
+    --bg-elevated: #FFFFFF;
+    --bg-surface: #EEF0F3;
+    --bg-inset: #E6E8EC;
+    --text-primary: #1A1E26;
+    --text-secondary: #545D6E;
+    --text-muted: #8B93A1;
+    --accent: #2E6AB8;
+    --accent-dim: #C4D8ED;
+    --accent-glow: rgba(46, 106, 184, 0.06);
+    --border: #D4D8DF;
+    --border-accent: #A8C4E0;
+    --tag-bg: rgba(46, 106, 184, 0.08);
+    --tag-text: #2E6AB8;
+    --warn: #A07A2D;
+    --warn-bg: rgba(160, 122, 45, 0.06);
+    --good: #3D8A52;
+    --good-bg: rgba(61, 138, 82, 0.06);
+    --bad: #B04040;
+    --bad-bg: rgba(176, 64, 64, 0.06);
+  }
+  :root[data-theme="dark"] {
+    --bg: #0C0E12;
+    --bg-elevated: #13161C;
+    --bg-surface: #1A1E26;
+    --bg-inset: #0A0C0F;
+    --text-primary: #D8DDE6;
+    --text-secondary: #8B93A1;
+    --text-muted: #545D6E;
+    --accent: #4A90D9;
+    --accent-dim: #2E5A8A;
+    --accent-glow: rgba(74, 144, 217, 0.08);
+    --border: #232830;
+    --border-accent: #2E5A8A;
+    --tag-bg: rgba(74, 144, 217, 0.1);
+    --tag-text: #6FAADF;
+    --warn: #D4A854;
+    --warn-bg: rgba(212, 168, 84, 0.08);
+    --good: #5AAF6F;
+    --good-bg: rgba(90, 175, 111, 0.08);
+    --bad: #C75D5D;
+    --bad-bg: rgba(199, 93, 93, 0.08);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 48px 32px 96px;
+  }
+
+  /* --- Header --- */
+  .doc-header {
+    padding-bottom: 40px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 48px;
+  }
+  .doc-eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  .doc-title {
+    font-size: 28px;
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--text-primary);
+    text-wrap: balance;
+    margin-bottom: 12px;
+  }
+  .doc-subtitle {
+    font-size: 16px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    max-width: var(--measure);
+  }
+  .doc-meta {
+    margin-top: 20px;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--text-muted);
+    font-family: var(--mono);
+  }
+  .doc-meta span { white-space: nowrap; }
+
+  /* --- Sections --- */
+  .section {
+    margin-bottom: 56px;
+  }
+  .section-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  h2 {
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.3;
+    margin-bottom: 16px;
+    color: var(--text-primary);
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.4;
+    margin-top: 32px;
+    margin-bottom: 10px;
+    color: var(--text-primary);
+  }
+  h4 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 20px;
+    margin-bottom: 8px;
+    color: var(--text-secondary);
+  }
+  p {
+    max-width: var(--measure);
+    margin-bottom: 12px;
+    color: var(--text-secondary);
+  }
+  p strong, li strong { color: var(--text-primary); font-weight: 600; }
+
+  /* --- Architecture diagram --- */
+  .arch-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 24px 0;
+    max-width: 640px;
+  }
+  .arch-layer {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    align-items: stretch;
+    min-height: 56px;
+  }
+  .arch-label {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: var(--bg);
+    border-right: 2px solid var(--border);
+  }
+  .arch-content {
+    display: flex;
+    align-items: center;
+    padding: 10px 20px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-left: none;
+  }
+  .arch-layer.highlight .arch-content {
+    background: var(--accent-glow);
+    border-color: var(--border-accent);
+    color: var(--text-primary);
+  }
+  .arch-layer.highlight .arch-label {
+    color: var(--accent);
+    border-right-color: var(--accent-dim);
+  }
+  .arch-connector {
+    width: 140px;
+    display: flex;
+    justify-content: center;
+    padding: 2px 0;
+  }
+  .arch-connector svg { display: block; }
+
+  /* --- Tables --- */
+  .table-wrap {
+    overflow-x: auto;
+    margin: 20px 0;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  th {
+    text-align: left;
+    padding: 10px 16px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--text-primary); font-weight: 500; }
+
+  /* --- Tags --- */
+  .tag {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .tag-ok { background: var(--good-bg); color: var(--good); }
+  .tag-partial { background: var(--warn-bg); color: var(--warn); }
+  .tag-missing { background: var(--bad-bg); color: var(--bad); }
+  .tag-new { background: var(--tag-bg); color: var(--tag-text); }
+
+  /* --- Code blocks --- */
+  pre {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px 20px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    margin: 16px 0;
+    max-width: 100%;
+  }
+  code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    background: var(--bg-surface);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--text-primary);
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  /* --- Lists --- */
+  ul, ol {
+    padding-left: 20px;
+    margin-bottom: 12px;
+    max-width: var(--measure);
+  }
+  li {
+    margin-bottom: 6px;
+    color: var(--text-secondary);
+  }
+  li::marker { color: var(--text-muted); }
+
+  /* --- Callout --- */
+  .callout {
+    border-left: 3px solid var(--accent-dim);
+    padding: 14px 20px;
+    margin: 20px 0;
+    background: var(--accent-glow);
+    max-width: var(--measure);
+  }
+  .callout p { margin-bottom: 0; color: var(--text-secondary); }
+  .callout strong { color: var(--accent); }
+
+  /* --- Decision box --- */
+  .decision {
+    border: 1px solid var(--border-accent);
+    background: var(--accent-glow);
+    padding: 20px 24px;
+    margin: 24px 0;
+    max-width: var(--measure);
+  }
+  .decision-label {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .decision p { margin-bottom: 8px; }
+  .decision p:last-child { margin-bottom: 0; }
+
+  /* --- Separator --- */
+  .sep {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* --- Diagram canvas --- */
+  .diagram-wrap {
+    margin: 24px 0;
+    overflow-x: auto;
+  }
+  .diagram-wrap canvas { display: block; max-width: 100%; }
+
+  /* --- Responsive --- */
+  @media (max-width: 640px) {
+    .page { padding: 32px 16px 64px; }
+    .doc-title { font-size: 22px; }
+    .arch-layer { grid-template-columns: 100px 1fr; }
+    .arch-label { font-size: 10px; padding: 8px 10px; }
+    .arch-content { font-size: 12px; padding: 8px 14px; }
+    .doc-meta { gap: 12px; }
+  }
+</style>
+
+<div class="page">
+
+  <!-- Header -->
+  <header class="doc-header">
+    <div class="doc-eyebrow">Design Document</div>
+    <h1 class="doc-title">Branching KV Cache for Agent Chat Sessions</h1>
+    <p class="doc-subtitle">Tree-structured session management with copy-on-write KV forking, tool-sandbox branches, and cold-storage persistence — built natively on SGLang RadixAttention, with optional kvcached VMM for GPU memory elasticity.</p>
+    <div class="doc-meta">
+      <span>Draft v0.2</span>
+      <span>2026-07-07</span>
+      <span>Status: RFC</span>
+    </div>
+  </header>
+
+  <!-- 1. Problem -->
+  <div class="section">
+    <div class="section-label">Section 1</div>
+    <h2>Problem Statement</h2>
+    <p>Agent chat sessions are not linear. Users edit earlier messages, regenerate responses, backtrack from dead-end trajectories, and explore alternative tool calls. Agents themselves need to speculatively execute tools in sandboxes and roll back on failure. Today's LLM serving engines treat conversations as flat token sequences — there is no concept of "branch here", "switch to branch B", or "undo the last tool call."</p>
+    <p>SGLang's RadixAttention already contains the core primitives — prefix sharing via a radix tree, reference counting, node splitting at divergence — but exposes none of them as session-level operations. This document designs the system that bridges session semantics and cache mechanics, built as native SGLang modifications.</p>
+  </div>
+
+  <!-- 2. Use Cases -->
+  <div class="section">
+    <div class="section-label">Section 2</div>
+    <h2>Use Cases</h2>
+    <p>Every case below requires the serving layer to fork, navigate, or lifecycle KV state. They divide into two families: <strong>user-initiated branches</strong> (conversation-level) and <strong>tool-sandbox branches</strong> (agent-level, COW).</p>
+
+    <h3>User-Initiated Branches</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Case</th><th>Trigger</th><th>Branch pattern</th><th>Lifetime</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Edit earlier message</td>
+            <td>User rewrites a past turn</td>
+            <td>Fork at edit point, two children</td>
+            <td>Persistent</td>
+          </tr>
+          <tr>
+            <td>Regenerate response</td>
+            <td>User requests new sample</td>
+            <td>Fork at same point, sibling leaf</td>
+            <td>Persistent</td>
+          </tr>
+          <tr>
+            <td>Backtrack trajectory</td>
+            <td>Agent hit dead end, user rewinds</td>
+            <td>Reactivate old node, new child</td>
+            <td>Persistent</td>
+          </tr>
+          <tr>
+            <td>Parallel strategy</td>
+            <td>User says "try both approaches"</td>
+            <td>Two active branches, user switches</td>
+            <td>Persistent</td>
+          </tr>
+          <tr>
+            <td>A/B prompt experiment</td>
+            <td>Different system prompts from same prefix</td>
+            <td>Fork at system-prompt boundary</td>
+            <td>Persistent</td>
+          </tr>
+          <tr>
+            <td>Multi-turn rollback with cherry-pick</td>
+            <td>"Redo steps 3–5 but keep step 6"</td>
+            <td>Fork + graft (new branch, injected content)</td>
+            <td>Persistent</td>
+          </tr>
+          <tr>
+            <td>Resume after model swap</td>
+            <td>User switches model mid-conversation</td>
+            <td>Fork at swap point; KV invalidated</td>
+            <td>Persistent</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Tool-Sandbox Branches (COW)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Pattern</th><th>Mechanism</th><th>Commit / Rollback</th><th>Lifetime</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Try-commit-rollback</td>
+            <td>Fork before risky tool call, execute in sandbox</td>
+            <td>User approves → commit; rejects → discard</td>
+            <td>Ephemeral</td>
+          </tr>
+          <tr>
+            <td>Speculative tool execution</td>
+            <td>Fork K branches, execute K tool alternatives</td>
+            <td>Evaluate results, commit best, discard rest</td>
+            <td>Ephemeral</td>
+          </tr>
+          <tr>
+            <td>Multi-step exploration + savepoints</td>
+            <td>Fork at start, savepoint forks at key steps</td>
+            <td>Rollback to any savepoint on failure</td>
+            <td>Short-lived</td>
+          </tr>
+          <tr>
+            <td>Parallel tool calls with merge</td>
+            <td>Fork N branches for N independent API calls</td>
+            <td>Merge all results back into main</td>
+            <td>Ephemeral</td>
+          </tr>
+          <tr>
+            <td>Shadow execution / dry run</td>
+            <td>Fork + mocked environment, show "what would happen"</td>
+            <td>If approved, re-execute for real on main</td>
+            <td>Ephemeral</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 3. Architecture -->
+  <div class="section">
+    <div class="section-label">Section 3</div>
+    <h2>Architecture: SGLang-Native with Optional Plugins</h2>
+    <p>All branching features are built as native SGLang modifications. Cold storage and GPU memory elasticity are optional plugins for deployments that need them.</p>
+
+    <div class="arch-stack">
+      <div class="arch-layer highlight">
+        <div class="arch-label">Session</div>
+        <div class="arch-content"><strong>Branch Manager</strong> &nbsp;—&nbsp; new module in <code>sglang.srt.mem_cache</code>: named branches, fork / switch / pin / delete API, sandbox lifecycle, two-phase commit <span class="tag tag-new">new</span></div>
+      </div>
+      <div class="arch-layer highlight">
+        <div class="arch-label">Cache</div>
+        <div class="arch-content"><strong>SGLang RadixAttention</strong> &nbsp;—&nbsp; radix tree extended with branch metadata, tree-aware eviction, segment-aware matching, attention kernels <span class="tag tag-partial">extended</span></div>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-label">Cold Store</div>
+        <div class="arch-content"><strong>LMCache / Mooncake</strong> &nbsp;—&nbsp; tiered KV persistence (CPU DRAM → NVMe → Redis → S3), KV compression, cross-node transfer <span class="tag tag-partial">optional plugin</span></div>
+      </div>
+      <div class="arch-layer">
+        <div class="arch-label">Memory</div>
+        <div class="arch-content"><strong>SGLang KV Pool</strong> (default) or <strong>kvcached VMM</strong> (optional) &nbsp;—&nbsp; block allocation for KV tensors <span class="tag tag-partial">kvcached optional</span></div>
+      </div>
+    </div>
+
+    <h3>Why SGLang-native</h3>
+    <p>Every branching feature — branch identity, tree-aware eviction, sandbox lifecycle, segment-aware matching, shared-prefix kernels — is a modification to SGLang internals (radix tree, scheduler, attention backend). No external framework provides these. Building them natively in SGLang gives direct access to the internals that matter, avoids monkey-patching fragility, and produces a single codebase to maintain.</p>
+    <ul>
+      <li><strong>Branch Manager</strong> is a new module in <code>sglang.srt.mem_cache</code>. It knows about sessions, tool calls, and user intent. It translates "fork here" into radix tree operations and "sandbox this tool" into branch + pin + environment snapshot.</li>
+      <li><strong>RadixCache</strong> is extended with branch metadata on nodes, tree-topology-aware eviction, and segment-aware prefix matching. These are surgical modifications to existing code paths.</li>
+      <li><strong>LMCache / Mooncake</strong> (optional) catches KV evicted from GPU before it's discarded entirely. LMCache already integrates with SGLang — the cold-store tier connects directly to the eviction path. Without it, eviction means full re-computation on branch revival.</li>
+      <li><strong>kvcached</strong> (optional) replaces SGLang's static KV pool with elastic GPU virtual memory. Useful for multi-model GPU sharing and scale-to-zero, but <strong>not required for branching</strong> — SGLang's existing pool + eviction handles branch workloads adequately.</li>
+    </ul>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 4. Framework Evaluation & Engineering Pattern -->
+  <div class="section">
+    <div class="section-label">Section 4</div>
+    <h2>Framework Evaluation &amp; Engineering Pattern</h2>
+
+    <h3>Capability mapping</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Capability needed for branching</th><th>SGLang</th><th>kvcached</th><th>LMCache / Mooncake</th><th>Who modifies it</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Prefix sharing via tree</td>
+            <td><span class="tag tag-ok">native</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td>SGLang (existing)</td>
+          </tr>
+          <tr>
+            <td>Node split at divergence</td>
+            <td><span class="tag tag-ok">native</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td>SGLang (existing)</td>
+          </tr>
+          <tr>
+            <td>Ref-counted cache nodes</td>
+            <td><span class="tag tag-ok">lock_ref</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td>SGLang (existing)</td>
+          </tr>
+          <tr>
+            <td>Branch identity + lifecycle API</td>
+            <td><span class="tag tag-missing">none → new</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td><strong>We build in SGLang</strong></td>
+          </tr>
+          <tr>
+            <td>Tree-aware eviction</td>
+            <td><span class="tag tag-partial">leaf-first LRU → extended</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td><strong>We modify SGLang</strong></td>
+          </tr>
+          <tr>
+            <td>Sandbox COW + two-phase commit</td>
+            <td><span class="tag tag-missing">none → new</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td><strong>We build in SGLang</strong></td>
+          </tr>
+          <tr>
+            <td>Segment-aware prefix matching</td>
+            <td><span class="tag tag-missing">none → new</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td><strong>We modify SGLang</strong></td>
+          </tr>
+          <tr>
+            <td>Shared-prefix attention kernel</td>
+            <td><span class="tag tag-missing">none → new</span></td>
+            <td>—</td>
+            <td>—</td>
+            <td><strong>We build in SGLang</strong></td>
+          </tr>
+          <tr>
+            <td>Cold-branch KV persistence</td>
+            <td><span class="tag tag-partial">HiRadixCache</span></td>
+            <td>—</td>
+            <td><span class="tag tag-ok">core</span></td>
+            <td>LMCache plugin (optional)</td>
+          </tr>
+          <tr>
+            <td>KV compression (CacheGen)</td>
+            <td>—</td>
+            <td>—</td>
+            <td><span class="tag tag-ok">LMCache</span></td>
+            <td>LMCache plugin (optional)</td>
+          </tr>
+          <tr>
+            <td>Elastic GPU memory (VMM)</td>
+            <td>—</td>
+            <td><span class="tag tag-ok">core</span></td>
+            <td>—</td>
+            <td>kvcached plugin (optional)</td>
+          </tr>
+          <tr>
+            <td>Multi-model GPU sharing</td>
+            <td>—</td>
+            <td><span class="tag tag-ok">core</span></td>
+            <td>—</td>
+            <td>kvcached plugin (optional)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>The key observation</h3>
+    <p>Every branching feature (rows 4–8) is a modification to <strong>SGLang internals</strong>. kvcached and LMCache contribute nothing to these — they're useful for orthogonal deployment concerns (GPU elasticity, cold storage) but don't shape the branching design.</p>
+
+    <h3>Three engineering patterns considered</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Pattern</th><th>Approach</th><th>Pros</th><th>Cons</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>A: Horizontal composition</strong></td>
+            <td>SGLang + kvcached + LMCache as required layers</td>
+            <td>Separation of concerns; kvcached team maintains VMM</td>
+            <td>kvcached's monkey-patching conflicts with SGLang modifications; three codebases; version coupling; integration debugging across projects</td>
+          </tr>
+          <tr>
+            <td><strong>B: Vertical integration</strong></td>
+            <td>Fork SGLang, build everything in one codebase</td>
+            <td>Single codebase; direct access to internals</td>
+            <td>Must reimplement VMM if needed; large fork divergence from upstream</td>
+          </tr>
+          <tr>
+            <td><strong>C: SGLang-native + optional plugins</strong></td>
+            <td>Build branching in SGLang natively; kvcached and LMCache are optional deployment plugins</td>
+            <td>Single codebase for branching; clean plugin boundaries; preserves option to use kvcached/LMCache; smaller diff against upstream</td>
+            <td>Must design allocator interface so kvcached autopatch doesn't conflict with branching modifications</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="decision">
+      <div class="decision-label">Decision: Pattern C — SGLang-native + optional plugins</div>
+      <p><strong>Build all branching features as native SGLang modifications.</strong> The Branch Manager, tree-aware eviction, sandbox lifecycle, segment-aware matching, and shared-prefix kernel are all modifications to <code>sglang.srt.mem_cache</code> and <code>sglang.srt.managers</code>. They work with SGLang's existing KV pool allocator — no kvcached required.</p>
+      <p><strong>kvcached is an optional deployment plugin</strong> for environments that need GPU memory elasticity (multi-model GPU sharing, scale-to-zero, colocation with training). It integrates via its existing autopatch mechanism and is independent of branching.</p>
+      <p><strong>LMCache is an optional cold-storage plugin</strong> for deployments where branch revival latency matters. It connects to SGLang's eviction path to demote KV before discarding. Without it, evicted branches are re-prefilled from token history.</p>
+    </div>
+
+    <h3>Why SGLang's existing KV pool is adequate for branching</h3>
+    <p>A concern with the SGLang-native approach is that SGLang pre-allocates a fixed-size KV pool at startup. Won't branching need elastic memory?</p>
+    <p>No — for the branching use case specifically:</p>
+    <ul>
+      <li><strong>Branch creation is already "zero-cost" in vanilla SGLang.</strong> When a new sequence shares a prefix, <code>match_prefix()</code> finds the cached prefix — no new KV blocks are allocated for the shared portion. Only newly generated tokens need new blocks.</li>
+      <li><strong>Idle branches consume only their unique suffix.</strong> For a typical agent session with 5–20 branches, most idle, the total unique KV across all branches is 2–5× the active branch length. The pre-allocated pool accommodates this easily.</li>
+      <li><strong>Memory pressure is handled by eviction, which we're improving.</strong> Tree-aware eviction with descendant weighting ensures shared prefixes survive while dead-end branches are reclaimed. This is exactly what the fixed pool + smart eviction model is designed for.</li>
+      <li><strong>kvcached's VMM value is orthogonal.</strong> GPU memory elasticity helps when multiple models share a GPU or when LLM serving colocates with other workloads. These are real deployment concerns but they're independent of branching — you can compose kvcached with branching at deployment time without coupling them at design time.</li>
+    </ul>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 5. Optional Plugins -->
+  <div class="section">
+    <div class="section-label">Section 5</div>
+    <h2>Optional Plugins: kvcached and LMCache</h2>
+    <p>Branching works with SGLang's stock allocator. These plugins are additive — they improve specific deployment scenarios without changing the branching design.</p>
+
+    <h3>kvcached: when to enable</h3>
+    <p>kvcached replaces SGLang's static KV pool with GPU virtual memory (CUDA VMM). It maps physical pages lazily on demand and unmaps them when freed. Enable it when:</p>
+    <ul>
+      <li><strong>Multiple models share a GPU.</strong> Agent sessions that switch models benefit from elastic memory sharing — the old model's KV is unmapped, the new model maps into freed physical pages. No static partitioning.</li>
+      <li><strong>LLM serving colocates with other GPU workloads.</strong> Training, fine-tuning, or vision models can reclaim GPU memory when the LLM is idle.</li>
+      <li><strong>Scale-to-zero / serverless.</strong> Models can release all physical memory when idle and re-acquire it on the next request.</li>
+    </ul>
+    <p>kvcached integrates via its existing autopatch mechanism — it monkey-patches SGLang's <code>TokenToKVPoolAllocator</code> and <code>MHATokenToKVPool</code> at import time. The branching modifications (Branch Manager, eviction policy, radix tree extensions) operate above the allocator interface and are unaffected by whether kvcached is enabled.</p>
+
+    <div class="callout">
+      <p><strong>Design constraint:</strong> branching modifications must not break kvcached's autopatch surface. The allocator interface (<code>alloc()</code>, <code>free()</code>, <code>available_size()</code>) is the clean boundary. Branching extends the radix tree and scheduler; kvcached replaces the allocator. These are non-overlapping concerns.</p>
+    </div>
+
+    <h3>LMCache: when to enable</h3>
+    <p>LMCache provides tiered KV persistence — CPU DRAM, NVMe, Redis, S3 — with KV compression (CacheGen) and non-prefix reuse (CacheBlend). Enable it when:</p>
+    <ul>
+      <li><strong>Branch revival latency matters.</strong> Without LMCache, evicted branches must be re-prefilled from tokens (compute-bound). With LMCache, evicted KV is demoted to CPU DRAM or NVMe first — revival reloads from cold store (bandwidth-bound, faster for conversations &gt;512 tokens).</li>
+      <li><strong>Cross-branch graft optimization.</strong> CacheBlend can reuse non-contiguous KV segments from cold-stored sibling branches, avoiding full re-prefill for graft operations.</li>
+      <li><strong>Distributed branch migration.</strong> RDMA/NIXL transfer allows migrating cold-stored branch KV to a different GPU/node.</li>
+    </ul>
+    <p>LMCache already integrates with SGLang — the cold-store tier connects directly to the eviction path. See Section 5b for the detailed design.</p>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 5b. Cold-Storage Tier -->
+  <div class="section">
+    <div class="section-label">Section 5b</div>
+    <h2>Cold-Storage Tier: LMCache / Mooncake for Branch Persistence</h2>
+    <p>Agent chat branches are revisited minutes or hours after creation. Without a cold-storage tier, an evicted branch's KV must be re-prefilled from tokens on revival — expensive for long conversations. LMCache and Mooncake provide the missing tier: <strong>demote before discard</strong>.</p>
+
+    <h3>The three-tier eviction cascade</h3>
+    <p>Eviction is no longer a binary "cached in HBM or gone." It becomes a demotion chain:</p>
+
+<pre><code>Branch KV lifecycle:
+
+  ┌─────────┐   evict    ┌─────────────┐   expire   ┌──────────┐
+  │ GPU HBM │ ─────────→ │ Cold Store  │ ──────────→ │ Discarded│
+  │ (hot)   │            │ (warm)      │             │ (replay) │
+  └─────────┘            └─────────────┘             └──────────┘
+       ↑     ← reload ←       │
+       │                       │
+  kvcached maps          LMCache stores
+  physical pages         in CPU DRAM / NVMe / Redis / S3</code></pre>
+
+    <ul>
+      <li><strong>Hot (GPU HBM):</strong> Active branch. KV in SGLang's KV pool, managed by the radix tree. Zero-latency attention access.</li>
+      <li><strong>Warm (Cold Store):</strong> Idle branch, KV demoted to CPU DRAM or NVMe via LMCache. Branch metadata (token sequence, branch handle, tree position) remains in the Branch Manager. Revival = reload KV from cold store into fresh pool blocks. Latency: PCIe/NVMe bandwidth-bound, not compute-bound.</li>
+      <li><strong>Discarded:</strong> Branch KV fully evicted from all tiers. Revival = full re-prefill from token history. Token history is always retained (tiny compared to KV).</li>
+    </ul>
+
+    <h3>Recompute vs. reload crossover</h3>
+    <p>Demotion to cold store is only worthwhile when <strong>reloading from cold store is faster than re-prefilling</strong>. The crossover depends on prefix length and hardware:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Cold tier</th><th>Bandwidth</th><th>Crossover (7B model)</th><th>Crossover (70B model)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>CPU DRAM (PCIe 5.0)</td>
+            <td>~64 GB/s</td>
+            <td>~512 tokens</td>
+            <td>~128 tokens</td>
+          </tr>
+          <tr>
+            <td>NVMe SSD (PCIe 4.0)</td>
+            <td>~7 GB/s</td>
+            <td>~4K tokens</td>
+            <td>~1K tokens</td>
+          </tr>
+          <tr>
+            <td>Redis (network)</td>
+            <td>~1-10 GB/s</td>
+            <td>~16K tokens</td>
+            <td>~4K tokens</td>
+          </tr>
+          <tr>
+            <td>S3 (remote)</td>
+            <td>~0.5 GB/s</td>
+            <td>Rarely wins</td>
+            <td>~32K+ tokens</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>For agent chat sessions with typical conversation lengths of 2K–16K tokens, <strong>CPU DRAM and NVMe are both firmly in the "reload wins" zone</strong>. Redis is marginal. S3 is useful only as archival persistence for very long conversations. LMCache supports all four backends — the Branch Manager selects the tier based on branch age and expected revival probability.</p>
+
+    <h3>KV compression for cold branches</h3>
+    <p>LMCache's <strong>CacheGen</strong> compresses KV tensors before cold storage, reducing the storage footprint and reload bandwidth. Compression ratios of 3–5× are typical for KV data. This makes NVMe and Redis tiers more viable by effectively multiplying their bandwidth. The tradeoff is decompression latency on the GPU at reload time — but for cold branch revival (which is already a second-scale operation), this is negligible.</p>
+
+    <h3>Non-prefix reuse via CacheBlend</h3>
+    <p>LMCache's <strong>CacheBlend</strong> enables reusing KV from non-contiguous prefix matches — if two branches share scattered segments (not just a common prefix), CacheBlend can selectively reload the matching segments and recompute only the gaps. This is particularly relevant for the <strong>cross-branch graft</strong> use case ("redo steps 3–5 but keep step 6"), where the grafted branch shares non-contiguous segments with multiple source branches.</p>
+
+    <h3>Integration architecture</h3>
+<pre><code>class ColdStoreTier:
+    def __init__(self, backend: str = "lmcache"):
+        if backend == "lmcache":
+            self.store = LMCacheClient(
+                local_device="cpu",       # CPU DRAM as first-level cold store
+                remote_url=None,          # optional Redis/S3 for deeper archival
+                compression="cachegen",   # KV compression enabled
+            )
+        elif backend == "mooncake":
+            self.store = MooncakeStoreClient(...)
+
+    def demote(self, branch: BranchHandle, kv_blocks: list[int],
+               allocator: TokenToKVPoolAllocator):
+        """Evicted from GPU — write KV to cold store before freeing pool blocks."""
+        kv_data = read_kv_from_gpu(kv_blocks)        # read before free
+        self.store.put(
+            key=branch.cold_store_key(),              # (branch_id, model_version, position_range)
+            data=kv_data,
+        )
+        allocator.free(kv_blocks)                     # return blocks to SGLang's KV pool
+        branch.cold_store_state = ColdStoreState.WARM
+
+    def promote(self, branch: BranchHandle,
+                allocator: TokenToKVPoolAllocator) -> list[int]:
+        """Branch revived — reload KV from cold store into fresh pool blocks."""
+        kv_data = self.store.get(branch.cold_store_key())
+        if kv_data is None:
+            branch.cold_store_state = ColdStoreState.DISCARDED
+            return []                                 # must re-prefill from tokens
+        new_blocks = allocator.alloc(len(kv_data))
+        write_kv_to_gpu(new_blocks, kv_data)          # decompress + copy to HBM
+        branch.cold_store_state = ColdStoreState.HOT
+        return new_blocks
+
+    def discard(self, branch: BranchHandle):
+        """Permanently delete cold KV — branch can only be revived via re-prefill."""
+        self.store.delete(branch.cold_store_key())
+        branch.cold_store_state = ColdStoreState.DISCARDED</code></pre>
+
+    <h3>Cold-store-aware eviction policy</h3>
+    <p>The eviction policy from Section 6.2 gains a new dimension: <strong>demotion cost</strong>. Before evicting a node, the Branch Manager checks whether the cold store has capacity and whether the KV is long enough to justify demotion (above the recompute-vs-reload crossover). Short branches skip cold storage and go straight to "discarded."</p>
+
+<pre><code>def evict_with_demotion(node, cold_store):
+    if node.pinned:
+        return  # never evict
+
+    if cold_store and node.kv_length >= RELOAD_CROSSOVER_THRESHOLD:
+        # Demote to cold store — worth the storage cost
+        cold_store.demote(node.branch, node.kv_blocks, allocator)
+    else:
+        # No cold store, or too short to justify — free blocks and discard
+        allocator.free(node.kv_blocks)
+        node.branch.cold_store_state = ColdStoreState.DISCARDED</code></pre>
+
+    <h3>Model version invalidation</h3>
+    <p>Cold-stored KV is <strong>model-version-bound</strong>: it was computed by specific model weights and is invalid after a model update. The cold store key includes <code>model_version_hash</code>. On model swap, all cold entries for the old version are either bulk-deleted or left to expire naturally via TTL. The Branch Manager does not attempt to reload stale KV — it falls back to re-prefill.</p>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 6. Design -->
+  <div class="section">
+    <div class="section-label">Section 6</div>
+    <h2>Detailed Design</h2>
+
+    <!-- 6.1 Branch Manager -->
+    <h3>6.1 &ensp; Branch Manager: Session-Level API</h3>
+    <p>The Branch Manager is a new module in <code>sglang.srt.mem_cache</code>. It provides a client-facing API for branch operations and translates them into radix tree + allocator operations.</p>
+
+    <h4>Core data model</h4>
+<pre><code>class BranchHandle:
+    branch_id: str              # unique identifier
+    branch_type: BranchType     # USER | SANDBOX | CHECKPOINT
+    parent_id: str | None       # parent branch (None for root)
+    fork_position: int          # token position where this branch diverges
+    token_sequence: list[int]   # full token sequence for this branch
+    pinned: bool                # if True, eviction cannot touch this branch's shared prefix
+    model_version: str          # hash of model weights — KV valid only for this version
+    created_at: float
+    last_accessed: float
+
+class BranchType(Enum):
+    USER = "user"               # persistent, user-navigable
+    SANDBOX = "sandbox"         # ephemeral, auto-deleted on commit/rollback
+    CHECKPOINT = "checkpoint"   # savepoint within a sandbox exploration</code></pre>
+
+    <h4>API surface</h4>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Operation</th><th>Semantics</th><th>Radix tree effect</th><th>Memory effect</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>create_session()</code></td>
+            <td>Start a new conversation</td>
+            <td>No-op (root created on first request)</td>
+            <td>No-op (blocks allocated on first request)</td>
+          </tr>
+          <tr>
+            <td><code>fork(session, pos)</code></td>
+            <td>Create a branch at token position</td>
+            <td>If node exists at pos, add child; else split node</td>
+            <td>No allocation — shared prefix KV already exists</td>
+          </tr>
+          <tr>
+            <td><code>switch(branch)</code></td>
+            <td>Make branch the active generation target</td>
+            <td><code>match_prefix()</code> on branch's token seq; cold-store promote if warm</td>
+            <td>Blocks allocated for cache miss portion</td>
+          </tr>
+          <tr>
+            <td><code>pin(branch)</code></td>
+            <td>Protect branch's shared prefix from eviction</td>
+            <td><code>lock_ref()</code> on ancestor nodes</td>
+            <td>No direct effect (blocks stay allocated)</td>
+          </tr>
+          <tr>
+            <td><code>unpin(branch)</code></td>
+            <td>Allow eviction of branch's cached KV</td>
+            <td><code>unlock_ref()</code> on ancestor nodes</td>
+            <td>Blocks eligible for eviction under pressure</td>
+          </tr>
+          <tr>
+            <td><code>delete(branch)</code></td>
+            <td>Remove branch and free its exclusive KV</td>
+            <td>Remove leaf; merge parent if single child remains</td>
+            <td>Blocks returned to pool; cold-store entry discarded</td>
+          </tr>
+          <tr>
+            <td><code>fork_sandbox(branch, tool_call)</code></td>
+            <td>COW fork for tool execution</td>
+            <td>Create child node with SANDBOX type</td>
+            <td>No allocation — blocks allocated on tool output</td>
+          </tr>
+          <tr>
+            <td><code>commit_sandbox(sandbox)</code></td>
+            <td>Promote sandbox to main continuation</td>
+            <td>Reparent: sandbox becomes the branch tip</td>
+            <td>No change (blocks already allocated)</td>
+          </tr>
+          <tr>
+            <td><code>rollback_sandbox(sandbox)</code></td>
+            <td>Discard sandbox, main branch untouched</td>
+            <td>Delete sandbox subtree</td>
+            <td>Sandbox-exclusive blocks returned to pool</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 6.2 Eviction -->
+    <h3>6.2 &ensp; Tree-Topology-Aware Eviction</h3>
+    <p>Current SGLang eviction is leaf-first LRU. This implicitly protects shared prefixes (a parent can't be evicted until all children are gone) but doesn't <em>weight</em> nodes by structural importance. The extension:</p>
+
+    <h4>Eviction priority = f(branch_type, descendant_count, recency, pin_state)</h4>
+<pre><code>def eviction_priority(node):
+    if node.pinned:
+        return float('inf')  # never evict
+
+    base = node.last_access_time
+
+    # Structural weight: more descendants = harder to evict
+    descendant_bonus = log2(1 + node.live_descendant_count) * DESCENDANT_WEIGHT
+
+    # Branch type: sandbox nodes evict aggressively after commit/rollback
+    type_penalty = {
+        BranchType.USER: 0,
+        BranchType.CHECKPOINT: -CHECKPOINT_PENALTY,
+        BranchType.SANDBOX: -SANDBOX_PENALTY if node.committed_or_rolled_back else 0,
+    }[node.branch_type]
+
+    return base + descendant_bonus + type_penalty</code></pre>
+
+    <p>Key properties:</p>
+    <ul>
+      <li><strong>Shared interior nodes</strong> with many descendants are protected by <code>descendant_bonus</code>, not just by leaf-first ordering.</li>
+      <li><strong>Committed/rolled-back sandbox nodes</strong> are evicted aggressively — their KV is dead weight.</li>
+      <li><strong>Pinned nodes</strong> are unevictable; the user explicitly declared them important.</li>
+      <li><strong>Leaf-first</strong> is preserved as a tiebreaker within the same priority band.</li>
+    </ul>
+
+    <h4>Integration with allocator and cold store</h4>
+    <p>Eviction triggers an optional demotion cascade before freeing blocks:</p>
+    <ol>
+      <li><strong>Radix tree eviction:</strong> SGLang's eviction selects a node via <code>eviction_priority()</code>.</li>
+      <li><strong>Cold-store demotion (if LMCache enabled):</strong> If the node's KV length exceeds the reload crossover threshold (Section 5b), the Branch Manager writes KV to LMCache before freeing blocks. The branch transitions from HOT to WARM.</li>
+      <li><strong>Block free:</strong> Block indices return to the pool via <code>allocator.free()</code>. (If kvcached is enabled, this triggers <code>cuMemUnmap</code> on physical pages. With SGLang's stock allocator, blocks simply return to the free list.)</li>
+    </ol>
+    <p>On branch revival, the Branch Manager checks cold store first (if available). On hit: reload KV from CPU DRAM/NVMe (bandwidth-bound, fast). On miss or no cold store: full re-prefill from token history (compute-bound, slow). The radix tree's <code>match_prefix()</code> handles both paths — a cold-store reload inserts the KV back into the tree as if it were a fresh prefill.</p>
+
+    <!-- 6.3 KV Validity -->
+    <h3>6.3 &ensp; KV Validity Across Mutations</h3>
+    <p>A radix tree keys on <code>(token_id, position)</code>. This is insufficient when the same token sequence yields different KV under different conditions.</p>
+
+    <h4>Extended cache key</h4>
+<pre><code>CacheKey = (token_ids: tuple[int], model_version_hash: str, segment_id: str)
+
+# model_version_hash: SHA256 of model checkpoint — KV from model A
+#   is invalid under model B even if tokens match.
+# segment_id: distinguishes volatile segments (system prompt, RAG context)
+#   from stable segments (conversation history). A system prompt change
+#   invalidates only the system-prompt segment's KV, not the conversation.</code></pre>
+
+    <h4>Segment-aware prefix matching</h4>
+    <p>The token sequence is divided into segments: <code>[system_prompt | conversation | tool_results | ...]</code>. Each segment has a segment_id derived from its content hash. When matching prefixes, the radix tree matches segment-by-segment, allowing a system prompt change to invalidate only the first segment while preserving the conversation prefix match.</p>
+
+    <p>This prevents two failure modes:</p>
+    <ul>
+      <li><strong>False positive</strong>: tokens match but KV is from a different model. Caught by <code>model_version_hash</code> mismatch → cache miss → re-prefill.</li>
+      <li><strong>False negative</strong>: system prompt changed, so the entire token sequence mismatches even though the conversation is identical. Segment-aware matching preserves the conversation hit.</li>
+    </ul>
+
+    <h4>Cross-branch graft</h4>
+    <p>"Redo steps 3–5 but keep step 6" requires composing content from two branches. The merged token sequence is novel — neither branch's KV covers it. RoPE embeds absolute position into K, so KV blocks can't be spliced across position boundaries. The Branch Manager handles this as:</p>
+    <ol>
+      <li>Create new branch at the divergence point (step 2).</li>
+      <li>Generate new content for steps 3–5.</li>
+      <li>Append step 6's <em>tokens</em> (not KV) from the old branch.</li>
+      <li>Re-prefill from the graft point. The shared prefix (steps 0–2) is a radix tree cache hit; only steps 3–6 are recomputed.</li>
+    </ol>
+
+    <!-- 6.4 Sandbox Two-Phase Commit -->
+    <h3>6.4 &ensp; Tool-Sandbox Two-Phase Commit</h3>
+    <p>A sandbox branch touches two state spaces: KV cache (inside SGLang) and world state (files, APIs, databases). COW on KV alone gives "undo the conversation"; COW on both gives "undo the action."</p>
+
+    <h4>Protocol</h4>
+<pre><code># Fork
+kv_branch = branch_manager.fork_sandbox(parent, tool_call)
+env_snapshot = environment_plugin.snapshot()  # filesystem, DB, etc.
+
+# Execute
+result = tool_executor.run(tool_call, sandbox_env=env_snapshot)
+
+# Decide
+if user_approves(result):
+    branch_manager.commit_sandbox(kv_branch)   # KV: sandbox becomes main
+    environment_plugin.promote(env_snapshot)     # World: make side-effects real
+else:
+    branch_manager.rollback_sandbox(kv_branch)  # KV: discard sandbox subtree
+    environment_plugin.revert(env_snapshot)      # World: undo side-effects</code></pre>
+
+    <h4>Environment plugin interface</h4>
+<pre><code>class EnvironmentPlugin(Protocol):
+    def snapshot(self) -> SnapshotHandle: ...
+    def promote(self, handle: SnapshotHandle) -> None: ...
+    def revert(self, handle: SnapshotHandle) -> None: ...
+
+# Implementations:
+# - FilesystemPlugin: btrfs/ZFS snapshot or overlayfs
+# - DatabasePlugin: savepoint / rollback
+# - APIPlugin: queue-and-replay (deferred execution)
+# - ContainerPlugin: Docker checkpoint/restore</code></pre>
+
+    <h4>Tool reversibility classification</h4>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Tool property</th><th>Sandbox?</th><th>Rationale</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Read-only</td>
+            <td><span class="tag tag-ok">No</span></td>
+            <td>No state change to undo</td>
+          </tr>
+          <tr>
+            <td>Idempotent write</td>
+            <td><span class="tag tag-ok">No</span></td>
+            <td>Re-execution ≡ undo + redo</td>
+          </tr>
+          <tr>
+            <td>Reversible write</td>
+            <td><span class="tag tag-partial">Optional</span></td>
+            <td>Compensating action possible without full fork</td>
+          </tr>
+          <tr>
+            <td>Irreversible write</td>
+            <td><span class="tag tag-missing">Required</span></td>
+            <td>No other undo mechanism — <code>DROP TABLE</code>, send email</td>
+          </tr>
+          <tr>
+            <td>Unknown / user-defined</td>
+            <td><span class="tag tag-missing">Default yes</span></td>
+            <td>Conservative — sandbox unless proven safe</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>Merge semantics</h4>
+    <p>Three cases, escalating in complexity:</p>
+    <ul>
+      <li><strong>Linear commit:</strong> Sandbox is the only active branch. Commit = pointer swap (sandbox child becomes main tip). KV is already correct.</li>
+      <li><strong>Commit with diverged main:</strong> Main advanced while sandbox ran. Requires <em>rebase</em>: replay sandbox's tool result after main's new content. KV from the insertion point must be recomputed. The shared prefix (up to the fork point) is a cache hit.</li>
+      <li><strong>Multi-branch merge:</strong> N sandbox results combined into one continuation. The merged token sequence is novel — re-prefill from the fork point with combined content. Shared prefix KV is reused.</li>
+    </ul>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 7. N-Branch Active Workload -->
+  <div class="section">
+    <div class="section-label">Section 7</div>
+    <h2>N-Branch Active Workload Optimizations</h2>
+    <p>When multiple branches are <em>simultaneously active</em> in the same batch (best-of-N, speculative tool execution, parallel strategies), the bottleneck shifts from cache management to compute efficiency.</p>
+
+    <h3>Shared-prefix attention kernel</h3>
+    <p>Today, even though N sibling branches share the same prefix KV in storage (via radix tree), each branch reads the prefix K,V tensors independently from HBM during attention. For prefix length L with N branches, that's (N−1)×L×num_heads×head_dim×2 bytes of redundant HBM bandwidth per layer per decode step.</p>
+
+    <callout class="callout">
+      <p><strong>Key insight:</strong> The radix tree knows which sequences share which prefix nodes. This topology should drive a fused attention kernel that loads shared-prefix K,V tiles once into SRAM and processes all N branches' queries against them. Per-branch state (running softmax accumulators) is O(head_dim) per branch — ~12KB for N=16, well within shared memory.</p>
+    </callout>
+
+    <h3>Sibling-affine batch scheduling</h3>
+    <p>The shared-prefix kernel only fires when siblings land in the same batch. A branch-aware scheduler should prefer to co-schedule siblings (same parent in the radix tree) and keep sibling groups together across iterations.</p>
+
+    <h3>Partial-generation scoring + pruning</h3>
+    <p>For speculative tool execution: score partial completions every K tokens, kill low-scoring branches early. The radix tree makes freeing a branch trivial (<code>dec_ref</code> → leaf eviction → blocks returned to pool).</p>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 8. Implementation Plan -->
+  <div class="section">
+    <div class="section-label">Section 8</div>
+    <h2>Implementation Phases</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Phase</th><th>Scope</th><th>Changes</th><th>Validates</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>P0</strong></td>
+            <td>Branch identity API + basic fork/switch/delete</td>
+            <td>New <code>BranchManager</code> in <code>sglang.srt.mem_cache</code>; extend <code>RadixCache</code> nodes with <code>BranchHandle</code> metadata; new REST endpoints <code>/v1/session/{fork,switch,delete,...}</code>. All changes are SGLang-internal.</td>
+            <td>Edit-message, regenerate, backtrack use cases work end-to-end with SGLang's stock allocator. Prefix sharing verified via cache hit metrics. Confirm kvcached autopatch still works (non-regression).</td>
+          </tr>
+          <tr>
+            <td><strong>P1</strong></td>
+            <td>Tree-aware eviction + pin/unpin</td>
+            <td>Replace <code>evict()</code> in <code>RadixCache</code> with <code>eviction_priority()</code>; add <code>live_descendant_count</code> to tree nodes. Eviction calls <code>allocator.free()</code> — works with both stock and kvcached allocators.</td>
+            <td>Under memory pressure, shared prefixes survive longer than single-use leaves. Pinned branches never evicted. Test with and without kvcached enabled.</td>
+          </tr>
+          <tr>
+            <td><strong>P2</strong></td>
+            <td>Tool-sandbox branches with COW</td>
+            <td><code>fork_sandbox()</code>, <code>commit_sandbox()</code>, <code>rollback_sandbox()</code> in BranchManager; <code>EnvironmentPlugin</code> interface with filesystem implementation. Pure SGLang modifications.</td>
+            <td>Tool call in sandbox, commit/rollback, verify KV and filesystem state correctness.</td>
+          </tr>
+          <tr>
+            <td><strong>P3</strong></td>
+            <td>Cold-storage tier via LMCache <span class="tag tag-partial">optional</span></td>
+            <td><code>ColdStoreTier</code> class wrapping LMCache client; demotion hook in eviction path; promote-on-revival in <code>switch()</code>; CacheGen compression; cold-store key includes <code>model_version_hash</code>. Gracefully degrades to no-op when LMCache is absent.</td>
+            <td>Evicted branch revival from CPU DRAM is faster than re-prefill for conversations &gt;512 tokens (7B model). Without LMCache, eviction still works (just no demotion).</td>
+          </tr>
+          <tr>
+            <td><strong>P4</strong></td>
+            <td>KV validity + segment-aware matching</td>
+            <td>Extended cache key with <code>model_version_hash</code> and <code>segment_id</code>; segment-aware <code>match_prefix()</code> in <code>RadixCache</code>.</td>
+            <td>Model swap correctly invalidates KV; system prompt change preserves conversation prefix.</td>
+          </tr>
+          <tr>
+            <td><strong>P5</strong></td>
+            <td>Shared-prefix attention kernel</td>
+            <td>New Triton/CUDA kernel for batched-query-over-shared-KV; scheduler modification in <code>sglang.srt.managers</code> for sibling-affine batching.</td>
+            <td>N-branch decode throughput improves by (N-1)/N × prefix_fraction compared to baseline.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <hr class="sep">
+
+  <!-- 9. Open Questions -->
+  <div class="section">
+    <div class="section-label">Section 9</div>
+    <h2>Open Questions</h2>
+
+    <ul>
+      <li><strong>Upstream strategy:</strong> Contribute branching features to SGLang upstream, or maintain a fork? Upstream is cleaner long-term but requires community alignment. The modifications touch core paths (<code>RadixCache</code>, scheduler, attention backend) — upstream acceptance depends on whether the SGLang team sees branching as a first-class use case.</li>
+      <li><strong>kvcached autopatch non-regression:</strong> Branching modifies <code>RadixCache</code> and adds <code>BranchManager</code> above the allocator. kvcached patches the allocator below. These should be non-overlapping, but need continuous testing to ensure kvcached's autopatch doesn't break on branching-modified SGLang. Integration test matrix: {stock allocator, kvcached} × {no cold store, LMCache}.</li>
+      <li><strong>Branch garbage collection policy:</strong> How long should an unpinned, unvisited branch survive before eviction? Time-based decay, or count-based (keep last N branches)? Should cold-store TTL differ from GPU eviction TTL?</li>
+      <li><strong>LMCache vs. HiRadixCache for demotion:</strong> SGLang's HiRadixCache already supports CPU-tier demotion natively. LMCache offers more backends (NVMe, Redis, S3), compression, and non-prefix reuse. Should we use HiRadixCache for local CPU demotion and LMCache only for deeper tiers? Or bypass HiRadixCache entirely and use LMCache uniformly?</li>
+      <li><strong>Cold-store capacity planning:</strong> How much CPU DRAM / NVMe should be provisioned for cold branches? For a system serving 1000 concurrent agent sessions with avg. 3 branches each, cold-store capacity = ~3000 × avg_branch_KV_size. With CacheGen compression (3–5×), this is tractable for CPU DRAM on typical servers.</li>
+      <li><strong>CacheBlend for cross-branch graft:</strong> LMCache's CacheBlend can reuse non-contiguous KV segments. For the graft use case ("redo steps 3–5, keep step 6"), CacheBlend could reload step 6's KV from a cold-stored sibling branch. Needs integration work — CacheBlend's segment matching must be aware of the branch tree structure.</li>
+      <li><strong>Sandbox environment plugin standardization:</strong> What's the minimal interface that covers filesystem, database, and container sandboxing without being so abstract it's useless?</li>
+      <li><strong>RoPE-free architectures:</strong> If the model uses ALiBi or NoPE instead of RoPE, KV blocks might be position-independent, enabling true cross-branch KV splicing. Worth investigating for graft operations.</li>
+    </ul>
+  </div>
+
+</div>

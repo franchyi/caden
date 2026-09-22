@@ -1,0 +1,47 @@
+# tool-call token trace
+# claude -p --output-format stream-json --include-partial-messages --verbose --model sonnet
+# columns:  <raw.jsonl line>   <elapsed s>   <event>
+
+L11      3.26  -- block complete
+L12      3.26  .. assistant text block begins
+L16      3.76  -- block complete
+L17      3.77  >> TOOL_USE START   name='Write'   <-- name known here, no args yet
+L18      3.77       args-delta   ''
+L19      3.77       args-delta   '{"file_path": "/home'
+L20      4.14       args-delta   '/ubuntu/bt/work/fib.py'
+L21      4.14       args-delta   '", "content": "def fib(n):\\n    if n <= 1'
+L22      4.59       args-delta   ':\\n        return n\\n    return fib(n - 1) + fib(n - 2)\\n\\np'
+L23      5.04       args-delta   '"}'
+L24      5.04  [resolved tool_use]  name='Write'  input={'file_path': '/home/ubuntu/bt/work/fib.py', 'content': 'def fib(n):\n    if n <= 1:\n        retur...'}
+L25      5.04  -- tool input COMPLETE   name='Write'   lead=1.28s
+L26      5.04  >> TOOL_USE START   name='Write'   <-- name known here, no args yet
+L27      5.04       args-delta   ''
+L28      5.04       args-delta   '{"file_path": "/home/ubuntu/bt/work/worker.py'
+L29      5.04       args-delta   '", "content": "import subprocess'
+L30      5.48       args-delta   '\\n\\np = subprocess.Popen([\\"sleep\\", \\"3\\"])\\nprint(p.pid)\\n'
+L31      5.48  <- tool_result returned (id=toolu_01Tok6ZcVrn5)
+L32      5.63       args-delta   '"}'
+L33      5.63  [resolved tool_use]  name='Write'  input={'file_path': '/home/ubuntu/bt/work/worker.py', 'content': 'import subprocess\n\np = subprocess.Popen(...'}
+L34      5.63  -- tool input COMPLETE   name='Write'   lead=0.59s
+L36      5.69  <- tool_result returned (id=toolu_01JeE3mFFMQh)
+L40      7.51  >> TOOL_USE START   name='Bash'   <-- name known here, no args yet
+L41      7.51       args-delta   ''
+L42      7.51       args-delta   '{"command": "cd /home/ubuntu/bt/work && python3 fib.py'
+L43      7.51       args-delta   '", "description": "Run fib.py'
+L44      7.51       args-delta   '"}'
+L45      7.51  [resolved tool_use]  name='Bash'  input={'command': 'python3 fib.py', 'description': 'Run fib.py'}
+L46      7.52  -- tool input COMPLETE   name='Bash'   lead=0.01s
+L49      7.69  <- tool_result returned (id=toolu_015KLcjxUFhT)
+L52      9.78  >> TOOL_USE START   name='Bash'   <-- name known here, no args yet
+L53      9.78       args-delta   ''
+L54      9.78       args-delta   '{"command": "python3 worker.py'
+L55      9.78       args-delta   '", "description": "Run worker.py'
+L56      9.78       args-delta   '", "timeout": 10000'
+L57      9.79       args-delta   '}'
+L58      9.79  [resolved tool_use]  name='Bash'  input={'command': 'python3 worker.py', 'description': 'Run worker.py', 'timeout': '10000'}
+L59      9.79  -- tool input COMPLETE   name='Bash'   lead=0.01s
+L64     12.85  <- tool_result returned (id=toolu_013bQ9ERhEA3)
+L67     13.97  .. assistant text block begins
+L73     14.96  -- block complete
+
+L76     14.98  RESULT  cost=$0.061008799999999995  turns=5

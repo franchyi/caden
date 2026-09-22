@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/aa-exec -p buildah -- /sandboxfs/crate-swebench-20260919/bin/bwrap.real "$@"

@@ -1,0 +1,18 @@
+*.swp
+.*.swp
+.DS_Store
+
+__pycache__/
+*.pyc
+experiments-results/
+experiments/mock/log_*
+experiments/mock/traces_*
+
+# Maintained in the separate franchyi/caden-paper repository.
+paper/
+
+# Local Python environments, caches, and generated root lockfile.
+/.venv/
+.pytest_cache/
+.ruff_cache/
+/uv.lock

@@ -1,0 +1,6 @@
+# Aligned SWE-rebench instances (problem_statement matches FAIL_TO_PASS), simonw/files-to-prompt.
+simonw__files-to-prompt-30
+simonw__files-to-prompt-16
+# harder aligned stretch: simonw__files-to-prompt-44 (stdin paths; 5 parametrized incl NUL-separated)
+# EXCLUDED simonw__files-to-prompt-36: problem_statement (Windows UTF-8 fix) does NOT match its
+#   FAIL_TO_PASS (test_line_numbers) — a mismatched/noisy instance; gold-check it with gold_check.py.

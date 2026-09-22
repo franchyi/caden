@@ -1,0 +1,7 @@
+.venv/
+results/*.json
+__pycache__/
+work/
+*.gold_test.patch
+*.egg-info/
+uv.lock

@@ -1,0 +1,8 @@
+  0.02s  claude(1372)
+  1.74s  claude(1372) |   ?(1421)
+  1.96s  claude(1372)
+  8.60s  claude(1372) |   bash(1586) |     python3(1618)
+  9.06s  claude(1372) |   bash(1586)
+  9.27s  claude(1372)
+ 16.99s  claude(1372) |   bash(1746) |     python3(1778) |       sleep(1779)
+ 20.07s  claude(1372)
