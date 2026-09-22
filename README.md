@@ -1,129 +1,111 @@
 # Caden
 
-Caden is a stage-aware host scheduler for dense AI-agent sandboxes.
+Private implementation repository: **https://github.com/franchyi/caden**.
+The default development branch is **`crate-mlsys`**.
 
-Formerly ORCA. Current code and documents use Caden; immutable experiment
-packages retain their original names and hashes. See the
-[September 21 naming migration](doc/naming-migration-2026-09-21.md).
+Caden is Crate's stage-aware scheduler for concurrent agent sandboxes.
+SandboxFS owns workspace construction and sandbox lifecycle; Caden owns
+admission, a bounded one-shot ready pool, CPU classes, and memory residency.
+The goal is greater sandbox density with tool-turn latency as a guardrail.
 
-The project goal is to increase agents per host at an interactive turn-latency
-SLO by treating sandboxes blocked on off-host LLM inference as cold/resumable
-tenants, while giving local response wakeups and tool bursts bounded CPU and
-memory priority.
+## Implementation scope
 
-## Active Crate implementation
+- OverlayFS workspaces over local immutable prepared bases, through the pinned
+  SandboxFS public API. The only cold-start baseline is a recursive private copy
+  of the same prepared base with reflink disabled.
+- Request-aware admission, queue-aware pool replenishment, model-wait-aware
+  freeze/reclaim, predictive preparation, and confirmed-response wake fencing.
+- Shared-base cache reclamation only when all consumers of a base are idle.
+- A common `MemoryTierBackend` interface with SSD and optional CXL backends.
+  SSD delegates to kernel reclaim and existing swap. CXL uses a native mmap
+  pager for explicitly registered cooperative memory; it does **not**
+  transparently offload arbitrary processes or OverlayFS state.
+- Real-command SWE-bench trajectory capture/replay, independent cold-start
+  probes, session-serving orchestration, accounting and evidence checks.
 
-`crate-mlsys` is the primary engineering branch for Crate's sandbox scheduling
-and density work. The active local checkout is `caden/`. The former
-`caden-swebench-verified/` worktree is retained as a detached reference; do not
-continue implementation there. This branch contains the committed scheduling
-checkpoint and the independent native CXL cold-store building block.
+CXLGen migration is a separate project and is not imported as a branch here.
+Cold-start claims cover a cold sandbox on a warm host with a prepared local
+base. Zero CXL payload in a serving run is not evidence of CXL offloading.
 
-SandboxFS owns copy-on-write workspace construction and sandbox lifecycle.
-Caden owns admission, bounded one-shot ready pools, stage-aware CPU allocation,
-and wait-aware freeze/reclaim/restore. The latest implementation includes:
+## Clone and run local tests
 
-- Queue-aware pool replenishment using already-arrived pending requests,
-  with bounded capacity and disposal of unnecessary in-flight precreations.
-- An explicit confirmed thaw-only restore mode; demand faults remain charged
-  to the subsequent real tool command, and speculative preparation cannot thaw.
-- Per-task SandboxFS routing, real-command SWE-bench replay with recorded model
-  waits, cold/first-touch timing, memory sampling, and fail-closed evidence checks.
+Python 3.13 is the project version. The regression suites need only the test
+dependencies below; live capture and legacy plotting tools have additional
+dependencies described in their own guides.
 
-Higher sandbox density is the objective; tool latency is a guardrail. This
-checkpoint does not establish a density result or universal latency improvement.
-Cross-host CXLGen migration remains on the separate `cxlgen-stage-ab` branch.
-The tiering direction is single-host CXL memory tiering, not migration. The
-committed base contains the mmap store in `native/cxl_coldstore/`; the current
-uncommitted implementation adds the registered-memory pager, shared backend
-interface, safety fixes, and serving/cache policy. CXL is optional and is not a
-dependency of the DRAM-SSD implementation. It does not transparently page
-arbitrary sandbox processes or OverlayFS state.
-Claude's implementation handoff and Codex's review criteria are maintained in
-`../crate-paper/docs/CXL_TIERING_HANDOFF.md`: implement a common memory-tier
-interface with SSD/CXL backends, then test in isolated runs on nsl17. Remote login
-and scoped project tests are authorized; host-wide swap changes and VM setup are
-not. Verify the exact shared-DAX reservation before any CXL writes.
-
-**Memory-tier backends (implemented; scoped safety fixes validated).** Byte movement beneath
-a residency decision now goes through one interface, `caden.memory_tier.MemoryTierBackend`,
-injected into `SandboxFSExecution`. `SSDTierBackend` (the default) is the
-unchanged cgroup-reclaim path; `CXLTierBackend` (`caden.cxl_tier`, opt-in) drives
-the native pager `native/cxl_coldstore/pagerd.c`, which copies registered
-cooperative mappings into the mmap store, releases their source pages and
-restores them eagerly or on demand. The pager is **not transparent**: unmodified
-tools register nothing, so it places none of their memory. Read
-[`native/cxl_coldstore/PAGER.md`](native/cxl_coldstore/PAGER.md) before citing
-any DRAM-CXL number; isolated nsl17 runs live in `experiments/cxl_tiering/`.
-
-See the [SWE-bench harness guide](experiments/swebench_verified/README.md).
-The completed campaign's original traces, frozen measured source and analysis
-remain in the sibling `crate-paper/docs/performance/swebench-verified-2026-09-19/`
-package. Its historical branch names and hashes are not rewritten when this
-engineering branch advances. The SandboxFS submodule remains pinned at
-`652aa279bbb2afb4068d4b838e2df8e103b247fe`.
-
-Run the local regression suite with Python and `pytest` installed:
-
-```sh
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -B -m pytest -q -p no:cacheprovider tests
+```bash
+git clone --branch crate-mlsys https://github.com/franchyi/caden.git
+cd caden
+python3.13 -m venv .venv
+.venv/bin/python -m pip install -r requirements-test.txt
+make test PYTHON=.venv/bin/python
 ```
 
-These tests use fixtures and mocked remote operations; they do not launch a
-measurement campaign, invoke a live model, or enable host-wide swap.
+`make test` runs both the scheduler/harness suite and the agent-pipeline suite.
+It does not call a live model, start a remote experiment, or change host swap.
+Linux native-pager integration tests are retained and report skipped when the
+platform or required native binaries are unavailable. A macOS pass does not
+claim Linux paging or real CXL hardware coverage.
 
-## Layout
+The portable native store/protocol tests require a C compiler, make and zlib
+headers. They use temporary/file-backed stores, not the real DAX device:
 
-- `src/`: Caden scheduler/controller implementation.
-- `experiments/`: harnesses, replay drivers, and evaluation scripts.
-- `doc/`: design plan, trace analysis, and historical notes.
-- `third_party/sandboxfs/`: pinned stock-Linux sandbox/workspace backend.
+```bash
+make native-check
+```
 
-Active plan: `doc/2026-05-29-plan.md`.
-Trace evidence: `doc/eval/local-trace-stage-report.md`.
+On Linux this also builds the pager and cooperative holder. Running the Python
+suite again then exercises applicable file-emulated pager tests; that remains
+separate from real-DAX qualification.
 
-The active SandboxFS integration, memory metric, baselines, acceptance rule,
-and test plan are in `doc/sandboxfs-memory-integration.md`. The sandbox-only
-predictive residency implementation—selective reclaim/compression, past-only
-return hazards, non-dispatching pre-restore, movement reserves, and the SLO
-breaker—is specified in `doc/speculative-sandbox-residency.md`. No KV-cache
-control is implemented. Runnable campaigns live in `experiments/sandboxfs_memory/`,
-`experiments/trajectory_replay/`, and `experiments/speculative_restore/`.
+## SandboxFS dependency
 
-A 2026-08-30 direct-path physical-Linux synthetic qualification completed
-preparation before the response boundary and removed polling/prewarm artifacts.
-For a 256-MiB full scan, fully reclaimed speculative p50/p95/p99 remained
-100.56/108.28/126.38 ms, while a matched frozen resident control reached
-44.46/48.63/49.97 ms only with zero reclaim. Remote `MADV_WILLNEED` restored
-cgroup DRAM but did not install missing PTEs. The correct 42--60 ms decision for
-this profile is therefore profile-specific reclaim rejection. This validates
-the host mechanism only; neither control is the formal FullCopy baseline.
+SandboxFS remains a Git submodule, pinned to
+`652aa279bbb2afb4068d4b838e2df8e103b247fe` from
+https://github.com/franchyi/sandboxfs. Clone access to that repository is
+required independently of access to Caden.
 
-A successor 2026-08-30 shared-host qualification expanded four captured
-`openai-codex/gpt-5.6-terra` boundaries to a fixed 32-instance queue and covered
-`N={1,2,4,8,16,32}` in 36 FullCopy/Crate reports (7,488/7,488 proxy turns).
-Crate selected zero reclaim and missed at least p95 through N=16. At N=32,
-FullCopy collapsed: Crate reached p95/p99 ratios 0.075/0.088, 0.432x
-sandbox-cgroup DRAM, and 7.08x throughput. This is a 0.1x-wait CoW load
-crossover, not fixed-SLO density. A matched N=8 attribution found that
-fixed/elapsed reclaim cut local cgroup DRAM about 58.5% but failed tails with
-about 7.9--8.0K major faults/run. Corrected sparse E3-v2 reset the full 256-MiB
-holder before every trial; no nonzero point passed both resident guards, even
-at 4.67 MiB p50 reclaimed. E3-v1 remains preserved and excluded for starting-
-state carryover. The companion paper repository preserves these under
-`docs/performance/orca/nsl17-figure-campaign-2026-08-30/`, alongside the earlier
-speculative, direct, and Terra packages.
+```bash
+git submodule update --init --recursive
+git submodule status
+```
 
-The 2026-07-18 EC2 mechanism campaign and raw evidence are in
-`results/orca-sandboxfs-2026-07-18/REPORT.md`. It passed the synthetic cold-start
-and mean-DRAM thresholds, but not the internal-workload/turn-latency claim.
+The Python regression suites do not require an initialized submodule. Building
+and deploying SandboxFS does; use its README and the experiment preflight.
 
-The public-trajectory and measured-mini-agent converters plus deterministic
-fixed-total tool/sandbox replay are in `experiments/trajectory_replay/`. Replay
-measures real filesystem cache, private writes, subprocess, and reclaim
-behavior; model calls occur only during separately labeled live trace capture,
-not once per matched treatment.
+## Experiments and evidence
 
-The trace-derived EC2 report is in
-`results/orca-trajectory-replay-2026-07-19/REPORT.md`. Its DRAM and cold-start
-targets passed, but aggressive reclaim failed the tool-turn latency guardrail.
+- [SWE-bench capture and cold-start harness](experiments/swebench_verified/README.md)
+- [SSD/CXL tiering and serving](experiments/cxl_tiering/README.md)
+- [Trajectory replay](experiments/trajectory_replay/README.md)
+- [Native CXL pager contract](native/cxl_coldstore/PAGER.md)
+- [Experiment index](experiments/README.md)
+
+The experiment runners still contain reference-lab host, user and path checks.
+They are not a turnkey installation for an arbitrary server. Prepared roots,
+original captured traces and raw performance packages are separate inputs,
+maintained with the paper/evidence repository at
+https://github.com/franchyi/crate-paper. Repository access does not imply that
+all large artifacts have been distributed. Do not run a historical preparation
+controller over preserved inputs or modify frozen evidence to match new names.
+
+Real CXL writes require a currently approved device/offset/length reservation,
+including coordination with any sharing host. Ordinary regression tests do not
+grant permission for Device-DAX writes, host-wide swapon or VM setup.
+
+## Origin of this repository
+
+This is a clean independent snapshot of the local `crate-mlsys` working tree
+from `franchyi/orca`, including the latest uncommitted Caden rename, CXL pager,
+policy fixes, serving harnesses and tests. The upstream base was
+`5d1acbd640cfea4221ed09cdab0cf1861b69e367`; that old commit alone does not
+represent the imported implementation.
+
+[Import provenance](migration/README.md) records the scope and per-file hashes.
+Old Git history, unrelated branches, raw traces, historical result packages,
+environments and compiled output were not mirrored. They remain untouched in
+their original locations. Historical documentation and trace schemas can still
+contain `orca` identifiers; current implementation/package naming is Caden.
+
+Use this repository's `crate-mlsys` branch for new work. The original repository
+was not reset, rewritten, re-pointed or committed by this export.

@@ -8,7 +8,7 @@ experiments-results/
 experiments/mock/log_*
 experiments/mock/traces_*
 
-# Maintained in the separate franchyi/caden-paper repository.
+# Maintained in the separate franchyi/crate-paper repository.
 paper/
 
 # Local Python environments, caches, and generated root lockfile.
@@ -16,3 +16,19 @@ paper/
 .pytest_cache/
 .ruff_cache/
 /uv.lock
+
+# Private inputs, credentials, generated evidence, and build output stay local.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.egg-info/
+build/
+dist/
+results/
+traces/
+maps/
+*.jsonl
+*.log
+*.zip

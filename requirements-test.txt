@@ -1,0 +1,3 @@
+# Dependencies for the scheduler/harness and agent-pipeline regression suites.
+pytest==9.1.1
+Jinja2==3.1.6
