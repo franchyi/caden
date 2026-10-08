@@ -53,6 +53,8 @@ def export_repo(tmp_path):
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
     (repo / "third_party/sandboxfs").mkdir(parents=True)
     (repo / "third_party/sandboxfs/go.mod").write_text("module sandboxfs\n")
+    (repo / "third_party/sandboxfs.provenance.json").write_text(
+        json.dumps({"upstream_commit": "652aa279bbb2afb4068d4b838e2df8e103b247fe"}))
     (repo / "script.sh").write_text("#!/bin/sh\n")
     (repo / "script.sh").chmod(0o755)
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
@@ -67,6 +69,8 @@ def test_source_export_and_no_overwrite(export_repo, tmp_path, archive):
     exporter = load_script("export_source")
     destination = tmp_path / ("delivery.tar.gz" if archive else "source")
     result = exporter.export(destination, root=export_repo, archive=archive)
+    assert result["sandboxfs_distribution"] == "vendored"
+    assert result["sandboxfs"] == "652aa279bbb2afb4068d4b838e2df8e103b247fe"
     assert hashlib.sha256(json.dumps(result["source_sha256"], sort_keys=True).encode()).hexdigest() == result["source_manifest_sha256"]
     if archive:
         with tarfile.open(destination) as tar:
@@ -84,3 +88,12 @@ def test_export_rejects_dirty_source(export_repo, tmp_path):
     (export_repo / "unreviewed.txt").write_text("not reviewed")
     with pytest.raises(ValueError, match="commit the reviewed"):
         load_script("export_source").export(tmp_path / "source", root=export_repo)
+
+
+def test_vendored_and_exported_commit_identity(export_repo, tmp_path):
+    from experiments.sandboxfs_memory.run_campaign import git_commit
+    assert git_commit(export_repo / "third_party/sandboxfs") == "652aa279bbb2afb4068d4b838e2df8e103b247fe"
+    destination = tmp_path / "source"
+    result = load_script("export_source").export(destination, root=export_repo)
+    assert git_commit(destination) == result["commit"]
+    assert git_commit(destination / "third_party/sandboxfs") == result["sandboxfs"]

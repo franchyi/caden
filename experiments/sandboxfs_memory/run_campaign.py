@@ -739,6 +739,17 @@ def command_output(argv: Sequence[str]) -> str:
 
 
 def git_commit(path: Path) -> str:
+    # A vendored directory is part of the parent Git repository. Asking Git
+    # inside it would incorrectly report Caden's commit as SandboxFS's commit.
+    path = path.resolve()
+    vendor = path.parent / "sandboxfs.provenance.json"
+    if path.name == "sandboxfs" and path.parent.name == "third_party" and vendor.is_file():
+        return str(json.loads(vendor.read_text())["upstream_commit"])
+    snapshot = path / "SOURCE_PROVENANCE.json"
+    if snapshot.is_file():
+        provenance = json.loads(snapshot.read_text())
+        if provenance.get("commit"):
+            return str(provenance["commit"])
     completed = subprocess.run(
         (
             "git",

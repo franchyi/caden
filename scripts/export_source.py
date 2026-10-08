@@ -43,6 +43,12 @@ def export(destination, *, archive=False, root=ROOT):
     provenance = {
         "repository": "https://github.com/franchyi/caden",
         "commit": commit,
+        "caden": commit,
+        "branch": git("branch", "--show-current").decode().strip() or "detached",
+        "starting_commit": commit,
+        "dirty": False,
+        "sandboxfs": json.loads(files["third_party/sandboxfs.provenance.json"])["upstream_commit"],
+        "sandboxfs_distribution": "vendored",
         "source_sha256": hashes,
         "source_manifest_sha256": hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest(),
         "scope": "new source export, not the measured September source",
