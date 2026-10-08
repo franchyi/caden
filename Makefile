@@ -1,5 +1,6 @@
 PYTHON ?= python3
 GO ?= go
+CGO_ENABLED ?= 0
 SANDBOXFS_COMMANDS := sandboxd sandboxfsd sandboxfsctl sandboxfsbench sandboxfscorpus
 
 .PHONY: test test-core test-agent native-check verify-vendor sandboxfs-build sandboxfs-test build source-dist
@@ -14,7 +15,7 @@ sandboxfs-build: verify-vendor
 	@mkdir -p third_party/sandboxfs/bin
 	@set -e; for command in $(SANDBOXFS_COMMANDS); do \
 		cd "$(CURDIR)/third_party/sandboxfs"; \
-		$(GO) build -trimpath -o bin/$$command ./cmd/$$command; \
+		CGO_ENABLED=$(CGO_ENABLED) $(GO) build -trimpath -o bin/$$command ./cmd/$$command; \
 	done
 
 sandboxfs-test: verify-vendor

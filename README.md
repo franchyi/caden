@@ -89,6 +89,9 @@ redistribution. The existing LZ4 license is retained under the native backend.
 
 Build outputs are `third_party/sandboxfs/bin/{sandboxd,sandboxfsd,sandboxfsctl,
 sandboxfsbench,sandboxfscorpus}` and `native/cxl_coldstore/build/`. The Linux
+Go build defaults to `CGO_ENABLED=0` so sandboxd does not inherit the host's
+glibc requirement when it runs inside older prepared task root filesystems.
+The Linux
 build additionally produces `crate_pagerd` and `coop_holder`. The Python wheel
 installs the scheduler library only; the full product source delivery is the
 repository or source archive, which also includes Go/C and experiment code.
