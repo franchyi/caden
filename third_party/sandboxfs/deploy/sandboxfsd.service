@@ -1,0 +1,18 @@
+[Unit]
+Description=SandboxFS OverlayFS workspace provisioner
+After=local-fs.target
+RequiresMountsFor=/var/lib/sandboxfs
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/sandboxfs/sandboxfsd.env
+ExecStart=/usr/local/bin/sandboxfsd --root=${SANDBOXFS_ROOT} --rootfs=${SANDBOXFS_ROOTFS} --state-dir=/var/lib/sandboxfs --socket=/run/sandboxfsd.sock --sandbox-user=ubuntu
+Restart=on-failure
+RestartSec=1
+TimeoutStopSec=20
+KillMode=control-group
+Delegate=yes
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target

@@ -27,18 +27,27 @@ CXLGen migration is a separate project and is not imported as a branch here.
 Cold-start claims cover a cold sandbox on a warm host with a prepared local
 base. Zero CXL payload in a serving run is not evidence of CXL offloading.
 
-## Clone and run local tests
+## Clone build and test
 
-Python 3.13 is the project version. The regression suites need only the test
-dependencies below; live capture and legacy plotting tools have additional
-dependencies described in their own guides.
+The source delivery contains Caden, SandboxFS, native tier backends, harnesses
+and tests in one repository. No Git submodule operation or second private
+repository permission is needed. Runtime component boundaries stay intact:
+Caden uses the SandboxFS public API, not its implementation internals.
+
+Use Python 3.13+, Go 1.24+, a C compiler, make and zlib headers. Live sandbox
+execution requires Linux, cgroup v2, Bubblewrap and an existing XFS volume
+(`ftype=1`, `reflink=1` for T1). Build/test commands do not install a service,
+format storage, change swap or access real Device-DAX.
 
 ```bash
 git clone --branch crate-mlsys https://github.com/franchyi/caden.git
 cd caden
 python3.13 -m venv .venv
 .venv/bin/python -m pip install -r requirements-test.txt
+.venv/bin/python -m pip install .
+make build PYTHON=.venv/bin/python
 make test PYTHON=.venv/bin/python
+make sandboxfs-test PYTHON=.venv/bin/python
 ```
 
 `make test` runs both the scheduler/harness suite and the agent-pipeline suite.
@@ -58,20 +67,63 @@ On Linux this also builds the pager and cooperative holder. Running the Python
 suite again then exercises applicable file-emulated pager tests; that remains
 separate from real-DAX qualification.
 
-## SandboxFS dependency
+## Included SandboxFS source
 
-SandboxFS remains a Git submodule, pinned to
+SandboxFS is vendored as ordinary tracked files in `third_party/sandboxfs`, from
 `652aa279bbb2afb4068d4b838e2df8e103b247fe` from
-https://github.com/franchyi/sandboxfs. Clone access to that repository is
-required independently of access to Caden.
+https://github.com/franchyi/sandboxfs. All 43 selected source/build/support
+files are byte-identical to that commit. Historical `results/` and Git metadata
+are excluded. The Go module path remains unchanged; this local Go module is
+not an external Git dependency and uses only the Go standard library.
 
 ```bash
-git submodule update --init --recursive
-git submodule status
+make verify-vendor PYTHON=.venv/bin/python
+make sandboxfs-build PYTHON=.venv/bin/python
+third_party/sandboxfs/bin/sandboxfsctl --help
 ```
 
-The Python regression suites do not require an initialized submodule. Building
-and deploying SandboxFS does; use its README and the experiment preflight.
+`third_party/sandboxfs.provenance.json` records upstream identity, the included
+paths and every source hash. No license file exists at that upstream commit;
+this import does not invent a license. Confirm licensing before public
+redistribution. The existing LZ4 license is retained under the native backend.
+
+Build outputs are `third_party/sandboxfs/bin/{sandboxd,sandboxfsd,sandboxfsctl,
+sandboxfsbench,sandboxfscorpus}` and `native/cxl_coldstore/build/`. The Linux
+build additionally produces `crate_pagerd` and `coop_holder`. The Python wheel
+installs the scheduler library only; the full product source delivery is the
+repository or source archive, which also includes Go/C and experiment code.
+
+## Deliver without a Git checkout
+
+From a clean committed checkout:
+
+```bash
+make source-dist PYTHON=.venv/bin/python
+tar -tzf dist/caden-source.tar.gz
+```
+
+The archive includes the complete tracked source, tests and vendored SandboxFS,
+plus `SOURCE_PROVENANCE.json`. It excludes `.git`, ignored inputs, credentials,
+build output and virtual environments. Extract it in a fresh directory, then
+run the build/test commands above. Export refuses to overwrite an existing
+archive. Python package/test dependencies and host tools still need to be
+installed; this is not an air-gapped binary appliance or a bundled SWE dataset.
+
+For a fresh experiment snapshot accepted by the measurement runners:
+
+```bash
+# RUN is an existing, empty, operator-selected campaign directory.
+.venv/bin/python scripts/export_source.py --directory "$RUN/source"
+make -C "$RUN/source" build
+```
+
+Pass `--sandboxfs-bin "$RUN/source/third_party/sandboxfs/bin"` to
+`run_tiering_suite.py` or `run_cxl_cold.py`. This selects the built host daemon,
+CLI and in-sandbox daemon together and records their hashes. The launcher
+read-only bind-mounts the selected sandboxd into its private mount namespace;
+it does not rewrite the prepared rootfs. Omitting the option preserves the
+historical input binaries for archival experiments. Do not claim that a new
+build reproduces the exact source identity of the September measurements.
 
 ## Experiments and evidence
 
@@ -88,6 +140,12 @@ maintained with the paper/evidence repository at
 https://github.com/franchyi/crate-paper. Repository access does not imply that
 all large artifacts have been distributed. Do not run a historical preparation
 controller over preserved inputs or modify frozen evidence to match new names.
+
+The self-contained setup and measurement guide is in
+`doc/caden-sandboxfs-report.docx`. Its build commands use this repository;
+measurement commands state the separate prepared-input and reservation
+requirements. The historical source snapshots remain the authority for the
+reported old measurements. This packaging change does not rerun those results.
 
 Real CXL writes require a currently approved device/offset/length reservation,
 including coordination with any sharing host. Ordinary regression tests do not

@@ -72,6 +72,8 @@ def main():
     ap.add_argument("--tag", required=True)
     ap.add_argument("--reservation", type=Path, required=True)
     ap.add_argument("--inputs", type=Path, default=Path("/sandboxfs/crate-swebench-20260919"))
+    ap.add_argument("--sandboxfs-bin", type=Path,
+                    help="complete SandboxFS build to use instead of historical input binaries")
     a = ap.parse_args()
     if os.geteuid() != 0 or os.uname().nodename not in {"nsl17", "nsl-node17"}:
         raise SystemExit("root on nsl17 required")
@@ -103,7 +105,9 @@ def main():
     tasks = selection["tasks"][:32]
     assert len(tasks) == len({t["instance_id"] for t in tasks}) == 32
     assert len({t["sequence"] for t in tasks}) == 32
-    ctl = str(a.inputs / "bin/sandboxfsctl")
+    from experiments.cxl_tiering.runtime_binaries import runtime_bin
+    binaries = runtime_bin(a.inputs, a.sandboxfs_bin)
+    ctl = str(binaries / "sandboxfsctl")
     launcher = str(ROOT / "experiments/cxl_tiering/launch-daemon.sh")
     status = {"stage": "preparing", "completed_samples": 0, "started_unix": time.time()}
     write_json(results / "PLAN.json", {
@@ -118,7 +122,8 @@ def main():
         "selection_sha256": sha256_file(selection_path),
         "source_provenance_sha256": sha256_file(ROOT / "SOURCE_PROVENANCE.json"),
         "binary_sha256": {str(p): sha256_file(p) for p in (
-            Path(ctl), a.inputs / "bin/sandboxfsd", ROOT / "native/cxl_coldstore/build/crate_pagerd")},
+            Path(ctl), binaries / "sandboxfsd", binaries / "sandboxd",
+            ROOT / "native/cxl_coldstore/build/crate_pagerd")},
         "dax_offset": a.dax_offset, "dax_capacity": a.dax_capacity,
         "safety": "8 GiB MemAvailable floor, 30% memory PSI ceiling; no host setting changes",
     })
@@ -141,7 +146,7 @@ def main():
             units.append((unit, task))
             subprocess.run(["systemd-run", f"--unit={unit}", "--property=Type=exec",
                 "--property=PrivateMounts=yes", "--property=AllowedCPUs=0-7", "--property=KillMode=mixed",
-                "/bin/bash", launcher, str(a.run_root), str(a.inputs), a.tag, index], check=True)
+                "/bin/bash", launcher, str(a.run_root), str(a.inputs), a.tag, index, str(binaries)], check=True)
         deadline = time.monotonic() + 90
         while not all(Path(t["socket"]).is_socket() for t in tasks):
             if time.monotonic() > deadline:

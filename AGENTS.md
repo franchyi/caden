@@ -3,7 +3,10 @@
 - Current project: Caden scheduler for Crate, branch `crate-mlsys`, package
   `caden`. Preserve historical `orca` trace schema compatibility.
 - SandboxFS owns workspace construction and lifecycle; Caden owns admission,
-  pools, CPU classes and residency. Use its pinned submodule/public API.
+  pools, CPU classes and residency. Use the public API of the vendored source
+  in `third_party/sandboxfs`; never require a submodule checkout.
+  `third_party/sandboxfs.provenance.json` records its exact upstream commit
+  and file hashes. Preserve that snapshot; record any future patches explicitly.
 - Recursive copying of the same prepared local base with reflink disabled is
   the only cold-start baseline. OverlayFS variants are treatments.
 - SSD and registered-memory CXL tiering are in scope. Cross-host CXLGen

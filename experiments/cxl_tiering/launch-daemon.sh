@@ -10,6 +10,11 @@ run_root=$1   # /data/chaoyi/crate-tiering/<run-id>
 inputs=$2     # /sandboxfs/crate-swebench-20260919 (read-only inputs)
 tag=$3
 index=$4
+binaries=${5:-$inputs/bin}
+[[ "$binaries" == /* && -d "$binaries" ]]
+for command in sandboxfsd sandboxfsctl sandboxd; do
+    [[ -x "$binaries/$command" && -f "$binaries/$command" ]]
+done
 [[ "$index" =~ ^[0-9][0-9]$ ]]
 [[ "$tag" =~ ^[a-z0-9]{4,16}$ ]]
 [[ "$run_root" == /data/chaoyi/crate-tiering/* && -d "$run_root" && ! -L "$run_root" ]]
@@ -37,7 +42,16 @@ mkdir -p "$short/bases/reference"
 mount --bind "$inputs/bases/$index" "$short/bases/reference"
 mount -o remount,bind,ro "$short/bases/reference"
 mount --bind "$inputs/scripts/bwrap-wrapper" /usr/bin/bwrap
-exec "$inputs/bin/sandboxfsd" \
+# A delivery build also supplies the in-sandbox daemon. This read-only bind
+# exists only in this transient unit's private mount namespace. It changes
+# neither the prepared rootfs on disk nor another run's view of that rootfs.
+if [[ "$binaries" != "$inputs/bin" ]]; then
+    agent="$inputs/rootfs/$index/usr/local/libexec/sandboxfs/sandboxd"
+    [[ -f "$agent" && ! -L "$agent" ]]
+    mount --bind "$binaries/sandboxd" "$agent"
+    mount -o remount,bind,ro "$agent"
+fi
+exec "$binaries/sandboxfsd" \
   --root "$short" --state-dir "$short/state" --socket "/run/crate-tier-$tag-$index.sock" \
   --sandbox-user chaoyi --rootfs "$inputs/rootfs/$index" \
   --sandboxd /usr/local/libexec/sandboxfs/sandboxd \

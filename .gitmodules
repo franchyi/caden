@@ -1,3 +1,0 @@
-[submodule "third_party/sandboxfs"]
-	path = third_party/sandboxfs
-	url = https://github.com/franchyi/sandboxfs.git

@@ -226,6 +226,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--run-root", type=Path, required=True)
     ap.add_argument("--inputs", type=Path, default=Path("/sandboxfs/crate-swebench-20260919"))
+    ap.add_argument("--sandboxfs-bin", type=Path,
+                    help="use this complete SandboxFS build; default preserves input binaries")
     ap.add_argument("--workloads", type=Path, required=True, help="run-local copy of normalized-formal")
     ap.add_argument("--tag", required=True)
     ap.add_argument("--configs", default="baseline,crate-ssd,crate-cxl")
@@ -341,7 +343,14 @@ def main() -> int:
             "source_manifest_sha256": sha256_file(ROOT / "SOURCE_PROVENANCE.json"),
             "workload_manifest_sha256": sha256_file(a.workloads / "manifest.json"),
             "relative_latency_target": 1.10, "inference": "single-pair development evidence"})
-    ctl = str(a.inputs / "bin/sandboxfsctl")
+    from experiments.cxl_tiering.runtime_binaries import runtime_bin
+    binaries = runtime_bin(a.inputs, a.sandboxfs_bin)
+    ctl = str(binaries / "sandboxfsctl")
+    write_json(results / "preflight/sandboxfs-build.json", {
+        "directory": str(binaries),
+        "source": "explicit build" if a.sandboxfs_bin else "historical input binaries",
+        "sha256": {name: sha256_file(binaries / name)
+                   for name in ("sandboxfsd", "sandboxfsctl", "sandboxd")}})
     units: list[str] = []
     status: dict[str, object] = {"run_root": str(run_root), "tag": a.tag, "stage": "daemons",
                                  "configurations": {key: {"state": "not-run"} for key, _, _ in runs}}
@@ -369,7 +378,7 @@ def main() -> int:
             subprocess.run(["systemd-run", f"--unit={unit}", "--property=Type=simple",
                             "--property=PrivateMounts=yes", "--property=AllowedCPUs=0-7",
                             "--property=KillMode=mixed", "/bin/bash", launcher,
-                            str(run_root), str(a.inputs), a.tag, index], check=True)
+                            str(run_root), str(a.inputs), a.tag, index, str(binaries)], check=True)
             units.append(unit)
         deadline = time.monotonic() + 120
         while not all(Path(task["socket"]).is_socket() for task in tasks):
