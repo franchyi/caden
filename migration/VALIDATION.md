@@ -28,3 +28,34 @@ check, not a guarantee that every possible secret format can be detected.
 The source checkout remains on `crate-mlsys` at
 `5d1acbd640cfea4221ed09cdab0cf1861b69e367`, with its prior uncommitted changes
 preserved. Bulk raw evidence and unrelated branch histories were not pushed.
+
+## Single repository delivery validation on 8 October 2026
+
+Implementation revision: `d455d0a60848c8a6dc1d2a479505f1c15b44a178`.
+The updated report pins this revision rather than claiming the September
+measurements came from the new packaging. Validation ran on macOS arm64 with
+Python 3.13.1 and Go 1.26.2; Linux amd64 binaries were also cross-built.
+
+| Check | Result |
+| --- | --- |
+| Core scheduler and harness suite | 491 passed, 22 platform skips, 7 subtests passed |
+| Agent-pipeline suite | 35 passed |
+| Vendored SandboxFS | All 43 selected files verified at upstream `652aa279bbb2afb4068d4b838e2df8e103b247fe` |
+| SandboxFS Go build and unit tests | Passed; no dependency fetch or submodule initialization |
+| Native store, transport and Python checks | Passed; file emulation/socketpair/mock evidence only |
+| Scheduler wheel | Built, installed and imported with no runtime Python dependencies |
+| Source export | Built and ran core tests from an export without Git metadata |
+| New export provenance | Verified with Python 3.12; distinct Caden and SandboxFS commit identities |
+| Linux sandboxd cross-build | ELF x86-64, statically linked with CGO disabled |
+| Serving workload reconstruction | 32 sessions, 384 calls; source commands, waits and fingerprints preserved |
+| Report commands | 16 Bash blocks syntax-checked; embedded Python parsed; runner options inspected |
+| Report layout | 18 rendered pages inspected; original body, figures and measured results preserved |
+
+No remote performance campaign, DAX access, global swap change, device format
+or host-service installation occurred. The new private-namespace binary binding
+has syntax and local argument validation but was not exercised in a privileged
+Linux end-to-end campaign here. Platform skips remain untested, not passes.
+Prepared SWE inputs and lab-host setup are external requirements, not contained
+in the source archive. The pinned SandboxFS commit contains no license file;
+resolve licensing before public redistribution. Raw historical evidence and
+the archived Caden Git checkout remain unchanged.

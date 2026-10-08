@@ -3,6 +3,10 @@
 Status: fixed-grace evidence preserved; predictive sandbox path implemented and awaiting formal campaign
 Date: 2026-08-30
 
+Packaging update on 2026-10-08: SandboxFS is now vendored as ordinary source
+files at `third_party/sandboxfs`, pinned by `third_party/sandboxfs.provenance.json`.
+The historical measurements below are unchanged by this packaging revision.
+
 ## 1. Decision
 
 Integrate SandboxFS as Caden's default Bubblewrap workspace/lifecycle backend,
@@ -20,7 +24,7 @@ pairs: 51.20%–56.83% lower time-weighted mean attributable DRAM and
 internal Multi-Agent business claim because the workload was synthetic and
 p95 wake latency regressed from about 0.56 s to 6.22 s. The memory result came
 from the stage-aware policy and a reclaimable working set, not from adding a
-submodule alone.
+dependency alone.
 
 ## 2. Why the combination is useful
 
@@ -93,9 +97,9 @@ sandboxfsd → Bubblewrap + persistent sandboxd
 XFS T1: shared lower + private OverlayFS upper/work
 ```
 
-SandboxFS is pinned as `third_party/sandboxfs`. Caden imports no Go package from
-the submodule; it uses the installed host API. The submodule supplies the exact
-daemon, CLI, install scripts, tests, and benchmark provenance.
+SandboxFS is pinned as `third_party/sandboxfs`. Caden imports no Go implementation
+internals; it uses the installed host API. The vendored source supplies the exact
+daemon, CLI, scripts and tests. Historical benchmark evidence remains external.
 
 ## 5. Lifecycle policy
 
@@ -272,7 +276,7 @@ but it is not necessary for the primary memory-policy claim.
 
 ## 10. Implementation deliverables
 
-1. SandboxFS Git submodule pinned to the evaluated implementation.
+1. SandboxFS source vendored at the evaluated upstream commit.
 2. `SandboxFSExecution` adapter implementing create, exec, destroy, CPU class,
    freeze/reclaim, restore, sandbox stats, and host stats.
 3. `StageAwareCaden` with queueing, admission, fixed/elapsed/request-aware
